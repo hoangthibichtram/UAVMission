@@ -24,9 +24,20 @@ public:
 	// Called every frame
 	//virtual void Tick(float DeltaTime) override;
 
+	//mang chua dinh
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Graph")
 	TArray<FVertexData> Vertices;
 
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Graph|Visual")
+	TObjectPtr<UStaticMesh> VertexMesh = nullptr;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Graph|Visual")
+	float VertexScale = 1000.0f;
+
 	UFUNCTION(BlueprintCallable, Category = "Graph")
 	bool LoadVerticesFromCSV(const FString& FileName);
+
+	UFUNCTION(BlueprintCallable, Category = "Graph")
+	void SpawnVertexActors();
+
 };

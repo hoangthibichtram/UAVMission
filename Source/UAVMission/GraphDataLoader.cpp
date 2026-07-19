@@ -4,26 +4,39 @@
 #include "GraphDataLoader.h"
 #include "Misc/FileHelper.h"      
 #include "Misc/Paths.h"  
+#include "Engine/StaticMeshActor.h"    //để spawn Static Mesh
+#include "Components/StaticMeshComponent.h" //để set mesh
 
 // Sets default values
 AGraphDataLoader::AGraphDataLoader()
 {
  	// Set this actor to call Tick() every frame.  You can turn this off to improve performance if you don't need it.
 	PrimaryActorTick.bCanEverTick = false;
-
+	
+	//mặc định dùng Sphere mesh 
+	static ConstructorHelpers::FObjectFinder<UStaticMesh> SphereMesh(TEXT("/Engine/BasicShapes/Sphere.Sphere"));
+	if (SphereMesh.Succeeded())
+	{
+		VertexMesh = SphereMesh.Object;
+	}
 }
 
 // Called when the game starts or when spawned
 void AGraphDataLoader::BeginPlay()
 {
 	Super::BeginPlay();
+	//đọc dl đỉnh
 	bool bSuccess = LoadVerticesFromCSV(TEXT("Vertex1.csv"));
 	if (bSuccess) {
-		UE_LOG(LogTemp, Warning, TEXT(" === Đã đọc %d đỉnh từ file CSV === "), Vertices.Num());
+		UE_LOG(LogTemp, Warning, TEXT(" === Đã đọc %d đỉnh từ file CSV === "),
+			Vertices.Num());
+
 		for (const FVertexData& V : Vertices) {
 			UE_LOG(LogTemp, Warning, TEXT("Đỉnh %d tại (%.1f, %.1f, %.1f) loại=%s"),
 			V.Id, V.Location.X, V.Location.Y, V.Location.Z, *V.TypeVertex);
 		}
+		//Spawn quả cầu tại mỗi đỉnh
+		SpawnVertexActors();
 	}
 	else {
 		UE_LOG(LogTemp, Error, TEXT("LỖI: Không đọc được file CSV!"));
@@ -31,6 +44,29 @@ void AGraphDataLoader::BeginPlay()
 	
 }
 
+//Hàm Spawn quả cầu=>duyệt từng vertex, sinnh ra AStaticMeshActor
+void AGraphDataLoader::SpawnVertexActors() {
+	UWorld* World = GetWorld();
+	if (!World || !VertexMesh) return;
+	for (const FVertexData& V : Vertices) {
+		FTransform SpawnTransform;
+		SpawnTransform.SetLocation(V.Location);
+		SpawnTransform.SetScale3D(FVector(VertexScale / 100.0f));
+
+		AStaticMeshActor* SphereActor = World->SpawnActor<AStaticMeshActor>(AStaticMeshActor::StaticClass(), SpawnTransform);
+		if (SphereActor) {
+			//gan mesh sphere cho actor vua spawn
+			SphereActor->GetStaticMeshComponent()->SetStaticMesh(VertexMesh);
+			SphereActor->SetActorLabel(
+				FString::Printf(TEXT("Vertex_%d_%s"), V.Id, *V.TypeVertex)
+			);
+			//tat collision de UAV co the bay xuyen qua dinh
+			SphereActor->GetStaticMeshComponent()->SetCollisionEnabled(ECollisionEnabled::NoCollision);
+		}
+	}
+	UE_LOG(LogTemp, Warning,
+		TEXT("=== Đã spawn %d quả cầu vào scene ==="), Vertices.Num());
+}
 //Hàm đọc file đỉnh
 bool AGraphDataLoader::LoadVerticesFromCSV(const FString& FileName)
 {
