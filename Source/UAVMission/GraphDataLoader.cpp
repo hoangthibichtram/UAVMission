@@ -12,7 +12,7 @@
 AGraphDataLoader::AGraphDataLoader()
 {
  	// Set this actor to call Tick() every frame.  You can turn this off to improve performance if you don't need it.
-	PrimaryActorTick.bCanEverTick = false;
+	PrimaryActorTick.bCanEverTick = true;
 	
 	//mặc định dùng Sphere mesh 
 	static ConstructorHelpers::FObjectFinder<UStaticMesh> SphereMesh(TEXT("/Engine/BasicShapes/Sphere.Sphere"));
@@ -51,8 +51,8 @@ void AGraphDataLoader::BeginPlay()
 	//Đơn vị
 	if (LoadUnitsFromCSV(TEXT("UnitUAV1.csv"))) {
 		UE_LOG(LogTemp, Warning, TEXT("=== Đã đọc %d đơn vị ==="), Units.Num());
-		SpawnUnitActors();
-		ConnectUnitsToGraph();
+		//SpawnUnitActors();
+		//ConnectUnitsToGraph();
 	}
 
 	LoadTargetsFromCSV(TEXT("Data_target1.csv"));
@@ -62,8 +62,12 @@ void AGraphDataLoader::BeginPlay()
 	UE_LOG(LogTemp, Warning, TEXT("=== GA Data: %d targets, %d UAVs, %d probs ==="),
 		Targets.Num(), UAVs.Num(), ProbabilityMap.Num());
 	RunGA();
+
 	OptimizeSubsets();
+
 	DrawAssignmentPaths();
+
+	SpawnUAVs();
 }
 
 //Hàm đọc file ĐỈNH
@@ -88,17 +92,19 @@ bool AGraphDataLoader::LoadVerticesFromCSV(const FString& FileName)
 
 		Line.ParseIntoArray(Cols, TEXT(","), false);
 
-		if (Cols.Num() < 6) continue;
+		if (Cols.Num() < 5) continue;
 		//tao dinh moi
 		FVertexData V;
 
-		float X = FCString::Atof(*Cols[1]);
-		float Y = FCString::Atof(*Cols[2]);
-		float Z = FCString::Atof(*Cols[3]);
+		double Northing = FCString::Atod(*Cols[0]);
+		double Easting = FCString::Atod(*Cols[1]);
+		double Alt = FCString::Atod(*Cols[2]);
 		//ghep X,Y,Z thanh location
-		V.Location = FVector(X, Y, Z);
-		V.Id = FCString::Atoi(*Cols[4]);
-		V.TypeVertex = Cols[5].TrimStartAndEnd();
+		V.Location = FVector((Northing - OriginNorthing) * MetersToUE,
+			(Easting - OriginEasting) * MetersToUE,
+			Alt * MetersToUE);
+		V.Id = FCString::Atoi(*Cols[3]);
+		V.TypeVertex = Cols[4].TrimStartAndEnd();
 		Vertices.Add(V);
 	}
 	//tra ve true neu doc duoc it nhat 1 dinh
@@ -137,10 +143,12 @@ void AGraphDataLoader::SpawnVertexActors() {
 				//chọn màu theo loại đỉnh
 				FString Type = V.TypeVertex.TrimStartAndEnd().ToLower();
 				FLinearColor Color;
-				if (Type == (TEXT("target")))
-					Color = FLinearColor(0.1f, 0.5f, 1.0f, 1.0f); // XANH 
+				if (Type == TEXT("target"))
+					Color = FLinearColor(0.1f, 0.5f, 1.0f, 1.0f);   // Xanh
+				else if (Type == TEXT("unit"))
+					Color = FLinearColor(1.0f, 0.0f, 0.0f, 1.0f);   // Do
 				else
-					Color = FLinearColor(0.8f, 0.8f, 0.8f, 0.8f); // XÁM
+					Color = FLinearColor(0.8f, 0.8f, 0.8f, 0.8f);   //Xam
 				// Gán màu vào parameter "BaseColor" của material
 				DynMat->SetVectorParameterValue(TEXT("Color"), Color);
 				// Gán material vào mesh
@@ -172,13 +180,13 @@ bool AGraphDataLoader::LoadEdgesFromCSV(const FString& FileName) {
 
 		Line.ParseIntoArray(Cols, TEXT(","), false);
 
-		if (Cols.Num() < 5) continue;
+		if (Cols.Num() < 4) continue;
 		//tao dinh moi
 		FEdgeData E;
 
-		E.StartId = FCString::Atoi(*Cols[2]); 
-		E.EndId = FCString::Atoi(*Cols[3]);   
-		E.Weight = FCString::Atof(*Cols[4]);  
+		E.StartId = FCString::Atoi(*Cols[1]); 
+		E.EndId = FCString::Atoi(*Cols[2]);   
+		E.Weight = FCString::Atof(*Cols[3]);  
 
 		Edges.Add(E);
 	}
@@ -208,7 +216,7 @@ void AGraphDataLoader::DrawEdges() {
 				true,
 				-1.0f,//lifetime
 				0,//DepthPriority
-				80.0f//Thickness
+				1500.0f//Thickness
 			);
 			DrawnCount++;
 		}
@@ -240,13 +248,18 @@ bool AGraphDataLoader::LoadUnitsFromCSV(const FString& FileName) {
 		//tao unit moi
 		FUnitData U;
 
-		float X = FCString::Atof(*Cols[3]);
-		float Y = FCString::Atof(*Cols[4]);
-		float Z = FCString::Atof(*Cols[5]);
+		double Northing = FCString::Atod(*Cols[0]);
+		double Easting = FCString::Atod(*Cols[1]);
+		double Alt = FCString::Atod(*Cols[2]);
 		//ghep X,Y,Z thanh location
-		U.Location = FVector(X, Y, Z);
-		U.UnitId = Cols[1].TrimStartAndEnd();
-		U.UnitName = Cols[2].TrimStartAndEnd();
+		U.Location = FVector(
+			(Northing - OriginNorthing) * MetersToUE,
+			(Easting - OriginEasting) * MetersToUE,
+			Alt * MetersToUE
+		);
+		U.UnitId = Cols[3].TrimStartAndEnd();
+		U.UnitName = Cols[4].TrimStartAndEnd();
+		U.VertexId = FCString::Atoi(*Cols[5]);
 		Units.Add(U);
 
 		UE_LOG(LogTemp, Warning, TEXT("Unit %s tại (%.1f, %.1f, %.1f)"),
@@ -256,98 +269,98 @@ bool AGraphDataLoader::LoadUnitsFromCSV(const FString& FileName) {
 	return Units.Num() > 0;
 }
 
-//spawn đơn vị
-void AGraphDataLoader::SpawnUnitActors() {
-	UWorld* World = GetWorld();
-	if (!World || !VertexMesh) return;
-	for (const FUnitData& U : Units) {
-		FTransform SpawnTransform;
-		//Lay vi tri Unit dat vao Transform = dat vi tri spawn
-		SpawnTransform.SetLocation(U.Location);
-		//Dat kich thuoc U
-		SpawnTransform.SetScale3D(FVector(UnitScale / 100.0f));
-		//spawn, tao actor trong world
-		AStaticMeshActor* UnitActor = World->SpawnActor<AStaticMeshActor>(
-			AStaticMeshActor::StaticClass(), SpawnTransform);
-		if (UnitActor) {
-
-			UnitActor->GetStaticMeshComponent()->SetStaticMesh(VertexMesh);
-
-			UnitActor->SetActorLabel(
-				FString::Printf(TEXT("Unit_%s"), *U.UnitId));
-
-			UnitActor->GetStaticMeshComponent()
-				->SetCollisionEnabled(ECollisionEnabled::NoCollision);
-
-			//color
-			UMaterial* BaseMat = LoadObject<UMaterial>(
-				nullptr,
-				TEXT("/Engine/BasicShapes/BasicShapeMaterial.BasicShapeMaterial")
-			);
-
-			if (BaseMat)
-			{
-				UMaterialInstanceDynamic* DynMat =
-					UMaterialInstanceDynamic::Create(BaseMat, UnitActor);
-				DynMat->SetVectorParameterValue(
-					TEXT("Color"),
-					FLinearColor(1.0f, 0.0f, 0.0f, 1.0f) //Đỏ
-				);
-				UnitActor->GetStaticMeshComponent()->SetMaterial(0, DynMat);
-			}
-		}
-	}
-
-	UE_LOG(LogTemp, Warning,
-		TEXT("=== Đã spawn %d Unit Actor ==="), Units.Num());
-}
-
-int32 AGraphDataLoader::FindNearestVertexIndex(const FVector& Position) const {
-	int32 NearestIdx = -1;
-	float MinDist = FLT_MAX;
-	for (int32 i = 0; i < Vertices.Num(); i++) {
-		float Dist = FVector::Dist(Position, Vertices[i].Location);
-		if (Dist < MinDist) {
-			MinDist = Dist;
-			NearestIdx=i;
-		}
-	}
-	return NearestIdx;
-}
-
-void AGraphDataLoader::ConnectUnitsToGraph() {
-	UWorld* World = GetWorld();
-	if (!World || Vertices.IsEmpty() || Units.IsEmpty()) return;
-	FColor UnitEdgeColor = FColor::White;
-	int32 ConnectedCount = 0;
-	for (const FUnitData& U : Units) {
-		//tìm đỉnh gần nhất 
-		int32 NearestIdx = FindNearestVertexIndex(U.Location);
-		if (NearestIdx < 0) continue;
-		const FVertexData& NearestV = Vertices[NearestIdx];
-
-		// Tính khoảng cách thực tế
-		float Dist = FVector::Dist(U.Location, NearestV.Location);
-
-		DrawDebugLine(
-			World,
-			U.Location,          
-			NearestV.Location,   
-			UnitEdgeColor,       
-			true,                
-			-1.0f,
-			0,
-			80.0f                
-		);
-		ConnectedCount++;
-
-		UE_LOG(LogTemp, Warning,
-			TEXT("Unit %s → Đỉnh %d (%.0f m)"),
-			*U.UnitId, NearestV.Id, Dist / 100.0f);
-	}
-	UE_LOG(LogTemp, Warning,
-		TEXT("=== Đã nối %d Unit vào graph ==="), ConnectedCount);
-} 
+////spawn đơn vị
+//void AGraphDataLoader::SpawnUnitActors() {
+//	UWorld* World = GetWorld();
+//	if (!World || !VertexMesh) return;
+//	for (const FUnitData& U : Units) {
+//		FTransform SpawnTransform;
+//		//Lay vi tri Unit dat vao Transform = dat vi tri spawn
+//		SpawnTransform.SetLocation(U.Location);
+//		//Dat kich thuoc U
+//		SpawnTransform.SetScale3D(FVector(UnitScale / 100.0f));
+//		//spawn, tao actor trong world
+//		AStaticMeshActor* UnitActor = World->SpawnActor<AStaticMeshActor>(
+//			AStaticMeshActor::StaticClass(), SpawnTransform);
+//		if (UnitActor) {
+//
+//			UnitActor->GetStaticMeshComponent()->SetStaticMesh(VertexMesh);
+//
+//			UnitActor->SetActorLabel(
+//				FString::Printf(TEXT("Unit_%s"), *U.UnitId));
+//
+//			UnitActor->GetStaticMeshComponent()
+//				->SetCollisionEnabled(ECollisionEnabled::NoCollision);
+//
+//			//color
+//			UMaterial* BaseMat = LoadObject<UMaterial>(
+//				nullptr,
+//				TEXT("/Engine/BasicShapes/BasicShapeMaterial.BasicShapeMaterial")
+//			);
+//
+//			if (BaseMat)
+//			{
+//				UMaterialInstanceDynamic* DynMat =
+//					UMaterialInstanceDynamic::Create(BaseMat, UnitActor);
+//				DynMat->SetVectorParameterValue(
+//					TEXT("Color"),
+//					FLinearColor(1.0f, 0.0f, 0.0f, 1.0f) //Đỏ
+//				);
+//				UnitActor->GetStaticMeshComponent()->SetMaterial(0, DynMat);
+//			}
+//		}
+//	}
+//
+//	UE_LOG(LogTemp, Warning,
+//		TEXT("=== Đã spawn %d Unit Actor ==="), Units.Num());
+//}
+//
+//int32 AGraphDataLoader::FindNearestVertexIndex(const FVector& Position) const {
+//	int32 NearestIdx = -1;
+//	float MinDist = FLT_MAX;
+//	for (int32 i = 0; i < Vertices.Num(); i++) {
+//		float Dist = FVector::Dist(Position, Vertices[i].Location);
+//		if (Dist < MinDist) {
+//			MinDist = Dist;
+//			NearestIdx=i;
+//		}
+//	}
+//	return NearestIdx;
+//}
+//
+//void AGraphDataLoader::ConnectUnitsToGraph() {
+//	UWorld* World = GetWorld();
+//	if (!World || Vertices.IsEmpty() || Units.IsEmpty()) return;
+//	FColor UnitEdgeColor = FColor::White;
+//	int32 ConnectedCount = 0;
+//	for (const FUnitData& U : Units) {
+//		//tìm đỉnh gần nhất 
+//		int32 NearestIdx = FindNearestVertexIndex(U.Location);
+//		if (NearestIdx < 0) continue;
+//		const FVertexData& NearestV = Vertices[NearestIdx];
+//
+//		// Tính khoảng cách thực tế
+//		float Dist = FVector::Dist(U.Location, NearestV.Location);
+//
+//		DrawDebugLine(
+//			World,
+//			U.Location,          
+//			NearestV.Location,   
+//			UnitEdgeColor,       
+//			true,                
+//			-1.0f,
+//			0,
+//			80.0f                
+//		);
+//		ConnectedCount++;
+//
+//		UE_LOG(LogTemp, Warning,
+//			TEXT("Unit %s → Đỉnh %d (%.0f m)"),
+//			*U.UnitId, NearestV.Id, Dist / 100.0f);
+//	}
+//	UE_LOG(LogTemp, Warning,
+//		TEXT("=== Đã nối %d Unit vào graph ==="), ConnectedCount);
+//} 
 
 TArray<int32> AGraphDataLoader::FindShortestPath(
 	int32 StartVertexId, int32 EndVertexId) {
@@ -485,13 +498,13 @@ bool AGraphDataLoader::LoadTargetsFromCSV(const FString& FileName) {
 		if (C.Num() < 11) continue;
 
 		FTargetData T;
-		T.TargetId = FCString::Atoi(*C[4]);
-		T.Code = C[5].TrimStartAndEnd();
-		T.Name = C[6].TrimStartAndEnd();
-		T.Priority = FCString::Atoi(*C[7]);
-		T.Explosive = FCString::Atof(*C[8]);
-		T.MilitaryValue = FCString::Atof(*C[9]);
-		T.VertexId = FCString::Atoi(*C[10]);
+		T.TargetId = FCString::Atoi(*C[3]);
+		T.Code = C[4].TrimStartAndEnd();
+		T.Name = C[5].TrimStartAndEnd();
+		T.Priority = FCString::Atoi(*C[6]);
+		T.Explosive = FCString::Atof(*C[7]);
+		T.MilitaryValue = FCString::Atof(*C[8]);
+		T.VertexId = FCString::Atoi(*C[9]);
 		Targets.Add(T);
 
 		UE_LOG(LogTemp, Warning, TEXT("Target %s: E=%.0f mv=%.0f pri=%d vertex=%d"),
@@ -512,18 +525,18 @@ bool AGraphDataLoader::LoadUAVsFromCSV(const FString& FileName)
 		if (Lines[i].IsEmpty()) continue;
 		TArray<FString> C;
 		Lines[i].ParseIntoArray(C, TEXT(","), false);
-		if (C.Num() < 12) continue;
+		if (C.Num() < 11) continue;
 
 		FUAVData U;
-		U.UavId = FCString::Atoi(*C[1]);
-		U.UavCode = C[2].TrimStartAndEnd();
-		U.UavType = C[3].TrimStartAndEnd();
-		U.Quantity = FCString::Atoi(*C[4]);
-		U.Range = FCString::Atof(*C[5]);
-		U.Speed = FCString::Atof(*C[6]);
-		U.Explosive = FCString::Atof(*C[8]);
-		U.MilitaryValue = FCString::Atof(*C[10]);
-		U.UnitId = C[11].TrimStartAndEnd();
+		U.UavId = FCString::Atoi(*C[0]);
+		U.UavCode = C[1].TrimStartAndEnd();
+		U.UavType = C[2].TrimStartAndEnd();
+		U.Quantity = FCString::Atoi(*C[3]);
+		U.Range = FCString::Atof(*C[4]);
+		U.Speed = FCString::Atof(*C[5]);
+		U.Explosive = FCString::Atof(*C[7]);
+		U.MilitaryValue = FCString::Atof(*C[9]);
+		U.UnitId = C[10].TrimStartAndEnd();
 		UAVs.Add(U);
 
 		UE_LOG(LogTemp, Warning,
@@ -618,6 +631,7 @@ void AGraphDataLoader::RepairSolution(TArray<TArray<int32>>& X) {
 			AssignedCount += X[i][j];
 
 		// Nếu số phân công vượt quá số chiếc UAV có → vi phạm R2
+		//Ở đây để lọc ra những phương án lãng phí.
 		if (AssignedCount > UAVs[i].Quantity)
 		{
 			// Score càng cao= phân công càng tối ưu=> giữ lại tối ưu nhất
@@ -646,11 +660,104 @@ void AGraphDataLoader::RepairSolution(TArray<TArray<int32>>& X) {
 				X[i][Scores[k].Value] = 1;//value ở đây là TargetId có kiểu dữ liệu int32 ở khai báo của Scores
 		}
 	}
-	
-	//R3: Σ_i x_ij ≤ Σ a_ij (khả dụng)
+	// ── XỬ LÝ DƯ VÀ THIẾU NỔ 
+   // Sắp xếp theo Priority tăng dần — mục tiêu quan trọng xử lý trước
+	TArray<int32> TargetOrder;
+	for (int32 j = 0; j < m; j++) TargetOrder.Add(j);
+	TargetOrder.Sort([&](int32 a, int32 b) {
+		return Targets[a].Priority < Targets[b].Priority;
+	});
+
+	for (int32 jIdx = 0; jIdx < m; jIdx++)
+	{
+		int32 j = TargetOrder[jIdx];
+		float Ej = Targets[j].Explosive;
+		if (Ej <= 0.0f) continue;
+
+		// Tính tổng nổ và danh sách UAV đang gán j
+		float         TotalExplosive = 0.0f;
+		TArray<int32> AssignedList;
+		for (int32 i = 0; i < n; i++)
+		{
+			if (X[i][j] != 1) continue;
+			TotalExplosive += UAVs[i].Explosive;
+			AssignedList.Add(i);
+		}
+
+		// ── Trường hợp DƯ ────────────────────────────────────
+		// Loại UAV có explosive nhỏ nhất nếu vẫn đủ sau khi loại
+		if (TotalExplosive > Ej && AssignedList.Num() > 0)
+		{
+			// Sắp xếp explosive tăng dần → thử loại nhỏ nhất trước
+			AssignedList.Sort([&](int32 a, int32 b) {
+				return UAVs[a].Explosive < UAVs[b].Explosive;
+				});
+
+			for (int32 iRemove : AssignedList)
+			{
+				float e = UAVs[iRemove].Explosive;
+				if (TotalExplosive - e >= Ej)
+				{
+					X[iRemove][j] = 0;   // giải phóng UAV thừa
+					TotalExplosive -= e;
+				}
+			}
+			continue; // sang mục tiêu tiếp theo
+		}
+		// ── Trường hợp THIẾU ──────────────────────────────────
+				// Tìm UAV bổ sung có explosive gần deficit nhất
+		if (TotalExplosive < Ej)
+		{
+			float Deficit = Ej - TotalExplosive;
+
+			// Cấu trúc ứng viên
+			struct FCandidate
+			{
+				int32 i;
+				float Explosive;
+				float Gap; // |explosive - deficit|: nhỏ → phù hợp hơn
+			};
+			TArray<FCandidate> Candidates;
+
+			for (int32 i = 0; i < n; i++)
+			{
+				if (X[i][j] == 1)              continue; // đã gán rồi
+				if (UAVs[i].Explosive <= 0.0f) continue; // không có nổ
+
+				// Còn slot không?
+				int32 Used = 0;
+				for (int32 jj = 0; jj < m; jj++) Used += X[i][jj];
+				if (Used >= UAVs[i].Quantity)  continue;
+
+				float Gap = FMath::Abs(UAVs[i].Explosive - Deficit);
+				// Thêm jitter nhỏ để tránh luôn chọn cùng 1 UAV
+				Gap += FMath::FRandRange(-0.5f, 0.5f);
+				Candidates.Add({ i, UAVs[i].Explosive, Gap });
+			}
+
+			// Sắp xếp: gap nhỏ nhất trước
+			Candidates.Sort([](const FCandidate& a, const FCandidate& b) {
+				return a.Gap < b.Gap;
+				});
+
+			// Gán từng UAV cho đến khi đủ Ej
+			for (const FCandidate& C : Candidates)
+			{
+				if (TotalExplosive >= Ej) break;
+				X[C.i][j] = 1;
+				TotalExplosive += C.Explosive;
+			}
+
+			// Vẫn thiếu → hủy toàn bộ (phân công nửa vời lãng phí UAV)
+			if (TotalExplosive < Ej)
+				for (int32 i = 0; i < n; i++) X[i][j] = 0;
+		}
+	}
+
+	// R3: VertexId <= 0 → x_ij = 0 
 	for (int32 i = 0; i < n; i++)
 		for (int32 j = 0; j < m; j++)
-			if (Targets[j].VertexId <= 0)// =-1( k tồn tại)
+			if (Targets[j].VertexId <= 0)
 				X[i][j] = 0;
 }
 
@@ -852,9 +959,8 @@ void AGraphDataLoader::DrawAssignmentPaths() {
 	TMap<FString, int32> UnitStartVertex;
 	for (const FUnitData& U : Units)
 	{
-		int32 NearestIdx = FindNearestVertexIndex(U.Location);
-		if (NearestIdx >= 0)
-			UnitStartVertex.Add(U.UnitId, Vertices[NearestIdx].Id);
+		if (U.VertexId >= 0)
+			UnitStartVertex.Add(U.UnitId, U.VertexId);
 	}
 	// Màu theo loại UAV
    // Chiến đấu → xanh lam, Cảm tử → đỏ cam
@@ -885,8 +991,31 @@ void AGraphDataLoader::DrawAssignmentPaths() {
 			else
 				Color = FLinearColor(1.0f, 0.3f, 0.0f, 1.0f); // CAM ĐỎ
 
+			// ===== LUU duong bay lai de UAV bay theo =====
+			FFlightPath NewPath;
+			NewPath.UAVCode = UAVs[i].UavCode;
+			NewPath.TargetName = Targets[j].Name;
+			NewPath.Color = Color;
+			NewPath.Speed = UAVs[i].Speed > 0.f ? UAVs[i].Speed : 100.f;
+
+			// Chuyen chuoi vertex ID thanh chuoi toa do
+			TMap<int32, FVector> PathLocMap;
+			for (const FVertexData& V : Vertices)
+				PathLocMap.Add(V.Id, V.Location);
+
+			for (int32 Id : Path)
+			{
+				if (FVector* Loc = PathLocMap.Find(Id))
+				{
+					NewPath.Points.Add(*Loc);
+				}
+			}
+
+			FlightPaths.Add(NewPath);
+			// ===== het phan luu =====
+			
 			// Vẽ đường bay
-			DrawPath(Path, Color, 150.0f);
+			DrawPath(Path, Color, 2000.0f);
 
 			PathCount++;
 
@@ -1019,6 +1148,186 @@ void AGraphDataLoader::OptimizeSubsets()
 	}
 }
 
+ //Called every frame
+void AGraphDataLoader::Tick(float DeltaTime)
+{
+	Super::Tick(DeltaTime);
+	APlayerController* PC = GetWorld()->GetFirstPlayerController();
+	if (PC && PC->WasInputKeyJustPressed(EKeys::Tab))
+	{
+		ToggleDashboard();
+	}
+
+}
+
+void AGraphDataLoader::ToggleDashboard()
+{
+	if (bDashboardVisible)
+	{
+		// Dang hien -> an di
+		if (DashboardWidget)
+		{
+			DashboardWidget->RemoveFromParent();
+		}
+		bDashboardVisible = false;
+	}
+	else
+	{
+		// Dang an -> hien len
+		if (!DashboardWidget && DashboardWidgetClass)// chưa có-> tạo
+		{
+			APlayerController* PC = GetWorld()->GetFirstPlayerController();
+			DashboardWidget = CreateWidget<UUserWidget>(PC, DashboardWidgetClass);
+		}
+		if (DashboardWidget)// đã có Widget -> hiện.
+		{
+			DashboardWidget->AddToViewport();
+		}
+		bDashboardVisible = true;
+
+		//// ===== TAM THOI: in du lieu ra man hinh de kiem tra =====
+		//FDashboardData D = GetDashboardData();
+		//if (GEngine)
+		//{
+		//	GEngine->AddOnScreenDebugMessage(-1, 8.f, FColor::Yellow,
+		//		FString::Printf(TEXT("Fitness: %.1f%% | Muc tieu du no: %d/%d"),
+		//			D.FitnessPercent, D.TargetsCovered, D.TargetsTotal));
+
+		//	for (const FTargetResult& TR : D.TargetResults)
+		//	{
+		//		GEngine->AddOnScreenDebugMessage(-1, 8.f, FColor::Green,
+		//			FString::Printf(TEXT("%s : %.0f%% tieu diet"),
+		//				*TR.TargetName, TR.DestroyPercent));
+		//	}
+		//}
+	}
+}
+
+FDashboardData AGraphDataLoader::GetDashboardData() const
+{
+	FDashboardData Data;
+
+	const int32 NumUAV = UAVs.Num();
+	const int32 NumTarget = Targets.Num();
+
+	Data.TargetsTotal = NumTarget;
+
+	// Tong gia tri quan su cua TAT CA muc tieu (mau so de tinh %)
+	float TotalValue = 0.f;
+	for (const FTargetData& T : Targets)
+	{
+		TotalValue += T.MilitaryValue;
+	}
+
+	float DestroyedValue = 0.f;   // tong gia tri ky vong tieu diet
+	int32 Covered = 0;     // so muc tieu du luong no
+
+	// ===== Duyet tung MUC TIEU j =====
+	for (int32 j = 0; j < NumTarget; ++j)
+	{
+		const FTargetData& Tgt = Targets[j];
+
+		float Survival = 1.f;   // Sj = tich (1 - p_ij)
+		float ExplosiveSum = 0.f;   // tong luong no cac UAV danh j
+
+		// Duyet tung UAV i xem co danh muc tieu j khong
+		for (int32 i = 0; i < NumUAV; ++i)
+		{
+			if (!BestAssignment.IsValidIndex(i))       continue;
+			if (!BestAssignment[i].IsValidIndex(j))    continue;
+			if (BestAssignment[i][j] != 1)             continue;   // UAV i KHONG danh j -> bo qua
+
+			const FUAVData& U = UAVs[i];
+
+			// p_ij: xac suat UAV i tieu diet muc tieu j
+			float p = GetProbability(U.UavCode, Tgt.TargetId);
+			Survival *= (1.f - p);          // nhan don xac suat song sot
+
+			ExplosiveSum += U.Explosive;
+
+			// --- Panel 2: them 1 dong phan cong ---
+			FAssignmentRow Row;
+			Row.UAVCode = U.UavCode;
+			Row.TargetName = Tgt.Name;
+			Row.KillProb = p;
+			Data.Assignments.Add(Row);
+
+			// --- Panel 4: cong don chi phi UAV ta dung ---
+			Data.OurCost += U.MilitaryValue;   // MilitaryValue cua UAV = chi phi
+		}
+
+		float KillProb = 1.f - Survival;   // 1 - Sj = xac suat muc tieu bi diet
+
+		// --- Panel 3: mot cot bieu do ---
+		FTargetResult TR;
+		TR.TargetName = Tgt.Name;
+		TR.DestroyPercent = KillProb * 100.f;   // phan MAU DO
+		TR.Priority = Tgt.Priority;
+		Data.TargetResults.Add(TR);
+
+		// Gia tri ky vong tieu diet cua muc tieu nay
+		DestroyedValue += Tgt.MilitaryValue * KillProb;
+
+		// Du luong no chua? (tong no cac UAV >= no can thiet cua muc tieu)
+		if (ExplosiveSum >= Tgt.Explosive)
+		{
+			Covered++;
+		}
+	}
+
+	Data.TargetsCovered = Covered;
+	Data.DestroyedValue = DestroyedValue;
+	Data.NetBenefit = Data.DestroyedValue - Data.OurCost;
+
+	// FitnessPercent = % gia tri dich bi tieu diet tren tong gia tri
+	if (TotalValue > 0.f)
+	{
+		Data.FitnessPercent = (DestroyedValue / TotalValue) * 100.f;
+	}
+
+	return Data;
+}
+
+//Thực hiện hóa kết quả tối ưu từ GA và Dijkstra
+void AGraphDataLoader::SpawnUAVs() {
+	int32 SpawnCount = 0;
+	for (const FFlightPath& FPath : FlightPaths)
+	{
+		if (FPath.Points.Num() < 2) continue;
+
+		// Tra loai UAV tu UAVCode
+		FString Type;
+		for (const FUAVData& U : UAVs)
+		{
+			if (U.UavCode == FPath.UAVCode)
+			{
+				Type = U.UavType.ToLower();
+				break;
+			}
+		}
+		// Chon Blueprint theo loai
+		TSubclassOf<AUAVPawn> ChosenClass;
+		bool bKamikaze = Type.Contains(TEXT("cảm tử")) || Type.Contains(TEXT("cam tu"));
+		if(bKamikaze)
+			ChosenClass = KamikazeClass;
+		else 
+			ChosenClass = CombatClass;
+
+		if (ChosenClass == nullptr) continue;
+
+		// Spawn UAV tai diem xuat phat
+		AUAVPawn* UAV = GetWorld()->SpawnActor<AUAVPawn>(
+			ChosenClass, FPath.Points[0], FRotator::ZeroRotator);
+
+		if (UAV)// nếu spawn thành công UAV
+		{
+			UAV->bIsKamikaze = bKamikaze;// thông báo loại UAV này
+			UAV->StartFlight(FPath);// ra lệnh bay
+			SpawnCount++;
+		}
+	}
+	UE_LOG(LogTemp, Warning, TEXT("=== Đã spawn %d UAV ==="), SpawnCount);
+}
 
 
 
@@ -1031,10 +1340,14 @@ void AGraphDataLoader::OptimizeSubsets()
 
 
 
-// Called every frame
-//void AGraphDataLoader::Tick(float DeltaTime)
-//{
-//	Super::Tick(DeltaTime);
-//
-//}
+
+
+
+
+
+
+
+
+
+
 

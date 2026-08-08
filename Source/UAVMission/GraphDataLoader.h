@@ -4,7 +4,9 @@
 
 #include "CoreMinimal.h"
 #include "GameFramework/Actor.h"
+#include "UAVPawn.h"
 #include "GraphTypes.h"
+#include "Blueprint/UserWidget.h"
 #include "GraphDataLoader.generated.h"
 
 UCLASS()
@@ -22,7 +24,7 @@ protected:
 
 public:	
 	// Called every frame
-	//virtual void Tick(float DeltaTime) override;
+	virtual void Tick(float DeltaTime) override;
 
 	//mang chua dinh
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Graph")
@@ -43,8 +45,8 @@ public:
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Graph")
 	TArray<FUnitData> Units;
 	 
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Graph|Visual")
-	float UnitScale = 5000.0f;
+	/*UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Graph|Visual")
+	float UnitScale = 5000.0f;*/
 
 	TMap<FString, float> ProbabilityMap;
 
@@ -57,6 +59,40 @@ public:
 
 	TArray<TArray<int32>> BestAssignment;
 	float BestFitness = 0.0f;
+
+	// ===== Dashboard =====
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Dashboard")
+	TSubclassOf<UUserWidget> DashboardWidgetClass;
+
+	UPROPERTY()
+	UUserWidget* DashboardWidget = nullptr;
+
+	bool bDashboardVisible = false;
+
+	// Danh sach tat ca duong bay (luu de UAV bay theo)
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Flight")
+	TArray<FFlightPath> FlightPaths;
+
+	//BP
+	UPROPERTY(EditAnywhere, BluePrintReadWrite, Category = "Flight")
+	TSubclassOf<AUAVPawn> KamikazeClass;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Flight")
+	TSubclassOf<AUAVPawn> CombatClass;
+
+	//Hệ tọa độ
+	UPROPERTY(EditAnywhere, Category = "Georeference")
+	double OriginNorthing = 1436888.0;    // X0 (m)
+
+	UPROPERTY(EditAnywhere, Category = "Georeference")
+	double OriginEasting = 506661.0;     // Y0 (m)
+
+	// 1 met that = bao nhieu don vi UE(~cm) (100 = ti le 1:1): vì đơn vị trong UE là cm
+	UPROPERTY(EditAnywhere, Category = "Georeference")
+	float MetersToUE = 100.f;
+
+
+
 
 	//hàm xử lý 
 
@@ -75,14 +111,14 @@ public:
 	UFUNCTION(BlueprintCallable, Category = "Graph")
 	bool LoadUnitsFromCSV(const FString& FileName);
 
-	UFUNCTION(BlueprintCallable, Category = "Graph")
+	/*UFUNCTION(BlueprintCallable, Category = "Graph")
 	void SpawnUnitActors();
 
 	UFUNCTION(BlueprintCallable, Category = "Graph")
-	int32 FindNearestVertexIndex(const FVector& Position) const;
+	void ConnectUnitsToGraph();*/
 
-	UFUNCTION(BlueprintCallable, Category = "Graph")
-	void ConnectUnitsToGraph();
+	/*UFUNCTION(BlueprintCallable, Category = "Graph")
+	int32 FindNearestVertexIndex(const FVector& Position) const;*/
 
 	UFUNCTION(BlueprintCallable, Category = "Graph")
 	TArray<int32> FindShortestPath(int32 StartVertexId, int32 EndVertexId);
@@ -107,6 +143,21 @@ public:
 
 	UFUNCTION(BlueprintCallable, Category = "GA")
 	void DrawAssignmentPaths();
+
+	//DashBoard
+	void ToggleDashboard();
+
+	UFUNCTION(BlueprintCallable, Category = "Dashboard")
+	FDashboardData GetDashboardData() const;
+
+	//BP
+	UFUNCTION(BlueprintCallable, Category = "Flight")
+	void SpawnUAVs();
+
+
+
+
+
 
 private:
 	// Tính fitness của 1 nghiệm
