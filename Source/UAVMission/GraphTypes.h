@@ -1,7 +1,10 @@
 #pragma once
 
 #include "CoreMinimal.h"
+
 #include "GraphTypes.generated.h"
+
+class AUAVPawn;
 
 USTRUCT(BlueprintType)
 struct FVertexData
@@ -40,7 +43,7 @@ struct FUnitData {
 	FString UnitName;
 
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Unit")
-	FVector Location;
+    FVector Location = FVector::ZeroVector;
 
     UPROPERTY(BlueprintReadOnly)
     int32 VertexId = -1;   
@@ -64,13 +67,16 @@ struct FTargetData
     int32 Priority = 1;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Target")
-    float Explosive = 0.0f;   
+    float ExplosiveReq = 0.0f;   
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Target")
-    float MilitaryValue = 0.0f;   // v_j: giá trị mục tiêu
+    float ValueUSD = 0.0f;   // v_j: giá trị mục tiêu
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Target")
     int32 VertexId = 0;       // đỉnh trong graph
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Target")
+    float GroundAltitude = 0.0f;   // cao do mat dat (m)
 };
 
 USTRUCT(BlueprintType)
@@ -91,7 +97,7 @@ struct FUAVData
     int32 Quantity = 1;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "UAV")
-    float Range = 0.0f;       // tầm bắn (cm)
+    float Range = 0.0f;       // tầm bay (m)
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "UAV")
     float Speed = 0.0f;     
@@ -100,7 +106,9 @@ struct FUAVData
     float Explosive = 0.0f;  
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "UAV")
-    float MilitaryValue = 0.0f;
+    float CostUSD = 0.0f;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "UAV")
+    float Budget = 0.0f;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "UAV")
     FString UnitId;          
@@ -175,6 +183,37 @@ struct FDashboardData
     float NetBenefit = 0.f;           // DestroyedValue - OurCost: lợi ích ròng.
 };
 
+UENUM(BlueprintType)
+enum class EFlightPhaseType : uint8
+{
+    Climb   UMETA(DisplayName = "Bay len"),
+    Cruise  UMETA(DisplayName = "Bay on dinh"),
+    Descent UMETA(DisplayName = "Ha xuong"),
+    Attack  UMETA(DisplayName = "Tan cong"),
+    Return  UMETA(DisplayName = "Quay ve")
+};
+
+USTRUCT(BlueprintType)
+struct FFlightPhase
+{
+    GENERATED_BODY()
+
+    UPROPERTY(BlueprintReadOnly, Category = "Flight")
+    FVector TargetPos = FVector::ZeroVector;
+
+    UPROPERTY(BlueprintReadOnly, Category = "Flight")
+    float Duration = 0.0f;
+
+    UPROPERTY(BlueprintReadOnly, Category = "Flight")
+    float AltitudeAboveGround = 0.0f;
+
+    UPROPERTY(BlueprintReadOnly, Category = "Flight")
+    float ArcHeight = 0.0f;
+
+    UPROPERTY(BlueprintReadOnly, Category = "Flight")
+    EFlightPhaseType PhaseType = EFlightPhaseType::Climb;
+};
+
 
 // ===== Mot duong bay hoan chinh cua 1 UAV =====
 USTRUCT(BlueprintType)
@@ -195,8 +234,116 @@ struct FFlightPath
     FLinearColor Color = FLinearColor::White;   // mau theo loai UAV
 
     UPROPERTY(BlueprintReadOnly, Category = "Flight")
-    float Speed = 300.f;           // toc do bay (cm/s)
+    float Speed = 300.f;
+
+    UPROPERTY()
+    FVector StartUnitPos;       // Vị trí xuất phát từ đơn vị
+
+    UPROPERTY()
+    FVector TargetPos;          // Vị trí mục tiêu
+
+    UPROPERTY()
+    float CruiseAltitude = 5000.0f;      // Độ cao bay ổn định (cm)
+
+    UPROPERTY()
+    float AttackDistance = 10000.0f;     // Cách mục tiêu bao xa khi bắt đầu hạ (cm)
+
+    UPROPERTY()
+    float AttackAltitude = 1000.0f;      // Độ cao khi tấn công (cm)
+
+    UPROPERTY()
+    bool bIsKamikaze = false;            // Cảm tử đây?
+
+    UPROPERTY()
+    TArray<FFlightPhase> Phases;         // Các phase bay
+
+};
+
+
+UENUM(BlueprintType)
+enum class EMarkerType : uint8
+{
+    Kamikaze   UMETA(DisplayName = "Cam tu"),
+    Combat     UMETA(DisplayName = "Chien dau"),
+    Fire       UMETA(DisplayName = "Muc tieu bi tan cong"),
+    Destroyed  UMETA(DisplayName = "Da pha huy")
+};
+
+USTRUCT(BlueprintType)
+struct FMinimapMarker
+{
+    GENERATED_BODY()
+
+    // Vi tri icon tren minimap, chuan hoa 0..1 (X = ngang, Y = doc)
+    UPROPERTY(BlueprintReadOnly)
+    FVector2D MapPos = FVector2D::ZeroVector;
+
+    // Huong mui UAV, do (0 = Bac)
+    UPROPERTY(BlueprintReadOnly)
+    float Heading = 0.f;
+
+    UPROPERTY(BlueprintReadOnly)
+    EMarkerType Type = EMarkerType::Combat;
+
+    UPROPERTY(BlueprintReadOnly)
+    FString UAVCode;
+
+    // Tham chieu de bam theo; null neu la dau X
+    UPROPERTY(BlueprintReadOnly)
+    TObjectPtr<AUAVPawn> UAVRef = nullptr;
 };
 
 
 
+// === Dữ liệu vẽ trên minimap ===
+USTRUCT(BlueprintType)
+struct FMinimapEdge
+{
+    GENERATED_BODY()
+
+    UPROPERTY()
+    FVector2D Start;  // Vị trí đầu (normalized [0,1])
+
+    UPROPERTY()
+    FVector2D End;    // Vị trí cuối
+
+    UPROPERTY()
+    FLinearColor Color = FLinearColor::White;
+
+    UPROPERTY()
+    float Thickness = 2.0f;
+};
+
+USTRUCT(BlueprintType)
+struct FMinimapObject
+{
+    GENERATED_BODY()
+
+    UPROPERTY()
+    FVector2D Position;    // Vị trí trên minimap [0,1]
+
+    UPROPERTY()
+    FString Name;
+
+    UPROPERTY()
+    FString Type;          // "Target", "UAV", "Unit"
+
+    UPROPERTY()
+    FLinearColor Color;
+
+    UPROPERTY()
+    float Size = 10.0f;    // Kích thước icon (pixel)
+};
+
+// === Dữ liệu tổng hợp gửi tới minimap ===
+USTRUCT(BlueprintType)
+struct FMinimapData
+{
+    GENERATED_BODY()
+
+    UPROPERTY()
+    TArray<FMinimapEdge> GraphEdges;
+
+    UPROPERTY()
+    TArray<FMinimapObject> Objects;  // Targets, UAVs, Units
+};
